@@ -3,10 +3,10 @@
 
 set -Eeuo pipefail
 
-# ===============================================
+# ================================================
 #             ELITEHAXX FF INDIA
-#           ROOT LAUNCHER | VERSION 2.0
-# ===============================================
+#          ADVANCED ROOT LAUNCHER v1.0
+# ================================================
 
 PKG="com.garena.game.ffi"
 
@@ -17,7 +17,6 @@ BIN_DEST="/data/local/tmp/casw"
 LIB_DEST="/data/data/com.garena.game.ffi/libcisfc.so"
 
 CACHE="$HOME/.elitehaxx/cache/v1.0.0"
-
 BIN_CACHE="$CACHE/casw"
 LIB_CACHE="$CACHE/libcisfc.so"
 
@@ -25,22 +24,21 @@ R='\033[1;31m'
 G='\033[1;32m'
 Y='\033[1;33m'
 C='\033[1;36m'
-B='\033[1;34m'
 N='\033[0m'
 
 info() {
     printf "${C}[*]${N} %s\n" "$*"
 }
 
-success() {
+ok() {
     printf "${G}[✓]${N} %s\n" "$*"
 }
 
-warning() {
+warn() {
     printf "${Y}[!]${N} %s\n" "$*"
 }
 
-error() {
+die() {
     printf "${R}[✗]${N} %s\n" "$*" >&2
     exit 1
 }
@@ -52,13 +50,13 @@ banner() {
     cat <<'EOF'
 ╔══════════════════════════════════════════╗
 ║                                          ║
-║          E L I T E H A X X               ║
+║           E L I T E H A X X              ║
 ║                                          ║
-║               FF INDIA                   ║
+║                FF INDIA                  ║
 ║                                          ║
-║       ADVANCED ROOT LAUNCHER             ║
+║          ADVANCED ROOT LAUNCHER          ║
 ║                                          ║
-║                v2.0                      ║
+║                 v1.0                     ║
 ╚══════════════════════════════════════════╝
 EOF
     printf "${N}\n"
@@ -66,23 +64,23 @@ EOF
 
 WORKDIR=""
 
-cleanup_temp() {
+cleanup() {
     if [[ -n "$WORKDIR" && -d "$WORKDIR" ]]; then
         rm -rf -- "$WORKDIR"
     fi
 }
 
-trap cleanup_temp EXIT
-
-trap 'warning "Interrupted"; exit 130' INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 banner
 
-# ===============================================
-# 1. DEPENDENCY CHECK
-# ===============================================
+# ================================================
+# 1. DEPENDENCY VERIFICATION
+# ================================================
 
-info "Checking Termux dependencies..."
+info "Checking dependencies..."
 
 for cmd in \
     curl \
@@ -90,69 +88,38 @@ for cmd in \
     su \
     mktemp \
     od \
-    cmp \
+    tr \
     awk \
+    cmp \
     mv; do
 
     command -v "$cmd" >/dev/null 2>&1 ||
-        error "Missing command: $cmd"
+        die "Missing dependency: $cmd"
 done
 
-success "Dependencies verified"
+ok "Dependencies verified"
 
-# ===============================================
-# 2. ROOT CHECK
-# ===============================================
+# ================================================
+# 2. INITIALIZE CACHE AND WORKSPACE
+# ================================================
 
-info "Checking root access..."
-
-ROOT_UID="$(su -c 'id -u' 2>/dev/null)" ||
-    error "Root access denied"
-
-[[ "$ROOT_UID" == "0" ]] ||
-    error "Root UID is not 0"
-
-success "Root access verified"
-
-# ===============================================
-# 3. PACKAGE CHECK
-# ===============================================
-
-info "Checking Free Fire India package..."
-
-if ! su -c "pm path '$PKG'" 2>/dev/null |
-    grep -q '^package:'; then
-
-    error "Package not installed: $PKG"
-fi
-
-if ! su -c "test -d '/data/data/$PKG'"; then
-    error "Package data directory missing"
-fi
-
-success "Package found: $PKG"
-
-# ===============================================
-# 4. CACHE INITIALIZATION
-# ===============================================
-
-info "Initializing persistent cache..."
+info "Initializing cache..."
 
 mkdir -p "$CACHE" ||
-    error "Cannot create cache directory"
+    die "Cannot create cache directory"
 
 chmod 700 "$CACHE"
 
 WORKDIR="$(mktemp -d "${TMPDIR:-$PREFIX/tmp}/elitehaxx.XXXXXXXX")" ||
-    error "Unable to create workspace"
+    die "Cannot create temporary workspace"
 
 chmod 700 "$WORKDIR"
 
-success "Cache initialized"
+ok "Cache ready"
 
-# ===============================================
-# 5. ELF FORMAT VALIDATION
-# ===============================================
+# ================================================
+# 3. ELF FILE VALIDATION
+# ================================================
 
 verify_elf() {
     local file="$1"
@@ -160,21 +127,22 @@ verify_elf() {
 
     [[ -s "$file" ]] || return 1
 
-    magic="$(od -An -tx1 -N4 "$file" |
-        tr -d ' \n')" || return 1
+    magic="$(
+        od -An -tx1 -N4 "$file" | tr -d ' \n'
+    )" || return 1
 
     [[ "$magic" == "7f454c46" ]]
 }
 
-# ===============================================
-# 6. SHA256 CACHE VALIDATION
-# ===============================================
+# ================================================
+# 4. SHA256 CACHE VERIFICATION
+# ================================================
 
 get_hash() {
     sha256sum "$1" | awk '{print $1}'
 }
 
-valid_hash() {
+valid_cache() {
     local file="$1"
     local hash_file="${file}.sha256"
     local actual
@@ -191,38 +159,35 @@ valid_hash() {
     [[ "$actual" == "$expected" ]]
 }
 
-# ===============================================
-# 7. SMART DOWNLOAD AND CACHE
-# ===============================================
+# ================================================
+# 5. SMART PERSISTENT DOWNLOAD
+# ================================================
 
 smart_download() {
     local url="$1"
     local dest="$2"
     local name="$3"
 
-    local temp_file="$WORKDIR/$name.download"
-    local current_hash
+    local temporary="$WORKDIR/$name.download"
+    local hash
 
     printf "\n"
-    info "Checking cached $name..."
+    info "Checking $name..."
 
-    if valid_hash "$dest"; then
-
-        success "$name cache is valid"
-        success "SHA256 matched"
-
-        printf "${G}[CACHE HIT]${N} Download skipped\n"
-
+    if valid_cache "$dest"; then
+        ok "$name already downloaded"
+        ok "SHA256 matches saved checksum"
+        info "Skipping download"
         return 0
     fi
 
     if [[ -e "$dest" ]]; then
-        warning "$name cache invalid or hash mismatch"
+        warn "Existing cache failed verification"
     else
-        warning "$name not found in cache"
+        warn "No cached file found"
     fi
 
-    info "Downloading fresh $name..."
+    info "Downloading $name..."
 
     curl \
         --fail \
@@ -235,40 +200,39 @@ smart_download() {
         --max-time 180 \
         --proto '=https' \
         --tlsv1.2 \
-        --output "$temp_file" \
+        --output "$temporary" \
         "$url" ||
-        error "Download failed: $name"
+        die "Download failed: $name"
 
-    [[ -s "$temp_file" ]] ||
-        error "Downloaded file is empty: $name"
+    [[ -s "$temporary" ]] ||
+        die "Downloaded file is empty: $name"
 
-    verify_elf "$temp_file" ||
-        error "Invalid ELF format: $name"
+    verify_elf "$temporary" ||
+        die "Invalid ELF file: $name"
 
-    current_hash="$(get_hash "$temp_file")" ||
-        error "SHA256 calculation failed"
+    hash="$(get_hash "$temporary")" ||
+        die "Unable to calculate SHA256"
 
-    chmod 600 "$temp_file"
+    chmod 600 "$temporary"
 
-    # Atomically replace cache contents and hash.
-    mv -f "$temp_file" "$dest" ||
-        error "Failed to save $name"
+    mv -f "$temporary" "$dest" ||
+        die "Unable to store $name"
 
-    printf '%s\n' "$current_hash" > "${dest}.sha256" ||
-        error "Cannot save SHA256"
+    printf '%s\n' "$hash" > "${dest}.sha256" ||
+        die "Unable to store checksum"
 
     chmod 600 "$dest" "${dest}.sha256"
 
-    valid_hash "$dest" ||
-        error "Cache verification failed: $name"
+    valid_cache "$dest" ||
+        die "Downloaded cache verification failed"
 
-    success "$name downloaded and cached"
-    success "SHA256: $current_hash"
+    ok "$name downloaded successfully"
+    ok "SHA256: $hash"
 }
 
-# ===============================================
-# 8. PREPARE BOTH FILES
-# ===============================================
+# ================================================
+# 6. DOWNLOAD OR REUSE FILES
+# ================================================
 
 smart_download \
     "$BIN_URL" \
@@ -281,15 +245,17 @@ smart_download \
     "libcisfc.so"
 
 printf "\n"
-success "All required files ready"
+ok "Both files ready"
 
-# ===============================================
-# 9. CREATE ROOT DEPLOY SCRIPT
-# ===============================================
+# ================================================
+# 7. PREPARE SINGLE ROOT WORKFLOW
+# ================================================
 
-info "Preparing root deployment..."
+info "Preparing root workflow..."
 
-cat > "$WORKDIR/root_deploy.sh" <<'ROOT'
+ROOT_SCRIPT="$WORKDIR/root_task.sh"
+
+cat > "$ROOT_SCRIPT" <<'ROOTSCRIPT'
 #!/system/bin/sh
 
 set -eu
@@ -297,139 +263,236 @@ set -eu
 SRC_BIN="$1"
 SRC_LIB="$2"
 
+PKG="com.garena.game.ffi"
+
 BIN="/data/local/tmp/casw"
 LIB="/data/data/com.garena.game.ffi/libcisfc.so"
 APP="/data/data/com.garena.game.ffi"
 
-test -d "$APP" || exit 20
-test -s "$SRC_BIN" || exit 21
-test -s "$SRC_LIB" || exit 22
+log() {
+    printf '[*] %s\n' "$1"
+}
 
-mkdir -p /data/local/tmp
+ok() {
+    printf '[+] %s\n' "$1"
+}
+
+fail() {
+    printf '[!] ERROR: %s\n' "$1" >&2
+    exit 1
+}
+
+# ================================================
+# ROOT CHECK - NO ADDITIONAL SU CALL
+# ================================================
+
+log "Verifying root session..."
+
+[ "$(id -u)" = "0" ] ||
+    fail "Root access not granted"
+
+ok "Root session active"
+
+# ================================================
+# PACKAGE VERIFICATION
+# ================================================
+
+log "Checking target package..."
+
+pm path "$PKG" 2>/dev/null |
+    grep -q '^package:' ||
+    fail "Target package not installed"
+
+[ -d "$APP" ] ||
+    fail "Application data directory missing"
+
+ok "Package verified: $PKG"
+
+# ================================================
+# VERIFY SOURCE FILES
+# ================================================
+
+log "Checking cached source files..."
+
+[ -s "$SRC_BIN" ] ||
+    fail "Cached executable missing"
+
+[ -s "$SRC_LIB" ] ||
+    fail "Cached library missing"
+
+ok "Source files verified"
+
+# ================================================
+# INSTALL BINARY
+# ================================================
+
+log "Checking executable destination..."
+
+mkdir -p /data/local/tmp ||
+    fail "Cannot prepare binary directory"
+
+if cmp -s "$SRC_BIN" "$BIN"; then
+    ok "Binary already matches cache"
+else
+    log "Copying executable..."
+    cp -f "$SRC_BIN" "$BIN" ||
+        fail "Failed to install executable"
+fi
+
+chown 0:0 "$BIN" ||
+    fail "Binary ownership failed"
+
+chmod 0755 "$BIN" ||
+    fail "Binary permission failed"
+
+cmp -s "$SRC_BIN" "$BIN" ||
+    fail "Binary integrity mismatch"
+
+ok "Executable installed and verified"
+
+# ================================================
+# INSTALL LIBRARY
+# ================================================
+
+log "Checking library destination..."
 
 APP_UID="$(stat -c %u "$APP")"
 APP_GID="$(stat -c %g "$APP")"
 
-# -----------------------------------------------
-# Copy binary only when content differs.
-# -----------------------------------------------
-
-if ! cmp -s "$SRC_BIN" "$BIN"; then
-    cp -f "$SRC_BIN" "$BIN"
+if cmp -s "$SRC_LIB" "$LIB"; then
+    ok "Library already matches cache"
+else
+    log "Copying library..."
+    cp -f "$SRC_LIB" "$LIB" ||
+        fail "Failed to install library"
 fi
 
-chown 0:0 "$BIN"
-chmod 0755 "$BIN"
+chown "$APP_UID:$APP_GID" "$LIB" ||
+    fail "Library ownership failed"
 
-# -----------------------------------------------
-# Copy library only when content differs.
-# -----------------------------------------------
+chmod 0644 "$LIB" ||
+    fail "Library permissions failed"
 
-if ! cmp -s "$SRC_LIB" "$LIB"; then
-    cp -f "$SRC_LIB" "$LIB"
-fi
+cmp -s "$SRC_LIB" "$LIB" ||
+    fail "Library integrity mismatch"
 
-chown "$APP_UID:$APP_GID" "$LIB"
-chmod 0644 "$LIB"
+ok "Library installed and verified"
 
-# -----------------------------------------------
-# Restore SELinux contexts.
-# -----------------------------------------------
+# ================================================
+# RESTORE SELINUX FILE LABELS
+# ================================================
+
+log "Checking SELinux contexts..."
 
 if command -v restorecon >/dev/null 2>&1; then
-    restorecon "$BIN" || exit 23
-    restorecon "$LIB" || exit 24
+    restorecon "$BIN" ||
+        fail "Binary context restoration failed"
+
+    restorecon "$LIB" ||
+        fail "Library context restoration failed"
+
+    ok "SELinux contexts restored"
+else
+    log "restorecon unavailable"
 fi
 
-# -----------------------------------------------
-# Verify deployed content.
-# -----------------------------------------------
+# ================================================
+# FINAL FILE VALIDATION
+# ================================================
 
-test -s "$BIN" || exit 25
-test -s "$LIB" || exit 26
+log "Running final checks..."
 
-test -x "$BIN" || exit 27
-test -r "$LIB" || exit 28
+[ -x "$BIN" ] ||
+    fail "Executable is not executable"
 
-cmp -s "$SRC_BIN" "$BIN" || exit 29
-cmp -s "$SRC_LIB" "$LIB" || exit 30
+[ -s "$LIB" ] ||
+    fail "Installed library is missing"
+
+cmp -s "$SRC_BIN" "$BIN" ||
+    fail "Executable verification failed"
+
+cmp -s "$SRC_LIB" "$LIB" ||
+    fail "Library verification failed"
+
+ok "All deployment checks passed"
+
+# ================================================
+# EXACT LAUNCH COMMAND
+# ================================================
+
+log "Launching ELITEHAXX FF INDIA..."
+
+cd / || fail "Cannot change directory to /"
+
+if ./data/local/tmp/casw --package com.garena.game.ffi --launch --hide --delay 250000 --libs /data/data/com.garena.game.ffi/libcisfc.so
+then
+    ok "Launch command completed successfully"
+else
+    fail "Launch command failed; library retained"
+fi
+
+# ================================================
+# CLEAN INSTALLED LIBRARY AFTER SUCCESS
+# ================================================
+
+log "Removing installed library..."
+
+rm -f -- "$LIB" ||
+    fail "Library removal failed"
+
+[ ! -e "$LIB" ] ||
+    fail "Library still exists"
+
+ok "Installed library removed"
+
+# ================================================
+# COMPLETION
+# ================================================
+
+printf '\n'
+echo "=========================================="
+echo "       ELITEHAXX FF INDIA - SUCCESS"
+echo "=========================================="
+
+ok "Root workflow completed"
+ok "Persistent Termux cache retained"
 
 exit 0
-ROOT
+ROOTSCRIPT
 
-chmod 700 "$WORKDIR/root_deploy.sh"
+chmod 700 "$ROOT_SCRIPT" ||
+    die "Unable to prepare root script"
 
-# ===============================================
-# 10. INSTALL FILES WITH ROOT
-# ===============================================
+# ================================================
+# 8. SINGLE ROOT AUTHORIZATION
+# ================================================
 
-info "Deploying files to required paths..."
+printf "\n"
+info "Requesting root permission once..."
 
-su -c "sh '$WORKDIR/root_deploy.sh' '$BIN_CACHE' '$LIB_CACHE'" ||
-    error "Root deployment failed"
+if su -c "sh '$ROOT_SCRIPT' '$BIN_CACHE' '$LIB_CACHE'"; then
+    ok "Root execution completed"
+else
+    die "Root workflow failed"
+fi
 
-success "Binary: $BIN_DEST"
-success "Library: $LIB_DEST"
-
-# ===============================================
-# 11. FINAL CHECK
-# ===============================================
-
-info "Performing final checks..."
-
-su -c "test -x '$BIN_DEST' && test -s '$LIB_DEST'" ||
-    error "Installed file verification failed"
-
-success "Final verification passed"
+# ================================================
+# 9. FINAL UI
+# ================================================
 
 printf "\n${G}"
-echo "╔══════════════════════════════════════════╗"
-echo "║           INSTALLATION READY             ║"
-echo "╚══════════════════════════════════════════╝"
+cat <<'EOF'
+╔══════════════════════════════════════════╗
+║                                          ║
+║           ELITEHAXX FF INDIA             ║
+║                                          ║
+║             TASK COMPLETE                ║
+║                                          ║
+║          SINGLE ROOT SESSION             ║
+║           SMART CACHE ENABLED            ║
+║                                          ║
+╚══════════════════════════════════════════╝
+EOF
 printf "${N}\n"
 
-# ===============================================
-# 12. EXACT EXECUTION COMMAND
-# ===============================================
-
-info "Starting ELITEHAXX FF INDIA..."
-
-if su -c 'cd / && ./data/local/tmp/casw --package com.garena.game.ffi --launch --hide --delay 250000 --libs /data/data/com.garena.game.ffi/libcisfc.so'; then
-
-    success "Launch command completed"
-
-else
-
-    error "Launch failed; library retained"
-
-fi
-
-# ===============================================
-# 13. REMOVE INSTALLED LIBRARY AFTER SUCCESS
-# ===============================================
-
-info "Cleaning installed library..."
-
-if su -c 'rm -f -- /data/data/com.garena.game.ffi/libcisfc.so && test ! -e /data/data/com.garena.game.ffi/libcisfc.so'; then
-
-    success "Installed library removed"
-
-else
-
-    error "Library cleanup failed"
-
-fi
-
-# ===============================================
-# 14. KEEP PERSISTENT CACHE
-# ===============================================
-
-success "Downloaded files preserved in cache"
-
-printf "\n${C}"
-echo "╔══════════════════════════════════════════╗"
-echo "║             PROCESS COMPLETE             ║"
-echo "║                                          ║"
-echo "║          ELITEHAXX FF INDIA              ║"
-echo "╚══════════════════════════════════════════╝"
-printf "${N}\n"
+ok "Done"
